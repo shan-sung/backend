@@ -31,3 +31,4 @@ def convert_mongo_user(user_doc: dict) -> dict:
         "phoneNumber": user_doc["phoneNumber"],
         "bio": user_doc.get("bio")
     }
+    

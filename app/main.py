@@ -1,23 +1,27 @@
 from fastapi import FastAPI, Body, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime
-from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
-from auth.auth import router as auth_router
-from auth.dependency import get_current_user
-from routes import saved
+import logging
+
+from app.auth.auth import router as auth_router
+from app.auth.dependency import get_current_user
+from app.routes import saved
+from app.database.database import requests_collection, trips_collection
+from app.models.schedule_model import ScheduleItem
 
 load_dotenv()
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = FastAPI()
+
 app.include_router(auth_router)
 app.include_router(saved.router)
 
-
-# 加入 CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,32 +30,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class ScheduleTime(BaseModel):
-    start: str
-    end: str
-
-class ScheduleItem(BaseModel):
-    day: int
-    time: ScheduleTime
-    activity: str
-    transportation: str
-    note: str = ""
-
-# MongoDB 設定
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-client = MongoClient(MONGO_URI)
-db = client["tripdb"]
-requests_collection = db["trip_requests"]
-trips_collection = db["trips"]
-
-# ObjectId 序列化工具
 def serialize_doc(doc):
-    doc["_id"] = str(doc["_id"])
-    return doc
+    return {
+        k: str(v) if isinstance(v, ObjectId) else v
+        for k, v in doc.items()
+    }
 
-# -----------------------
-# Trip Request API
-# -----------------------
 
 def calculate_days(start_date: str, end_date: str) -> int:
     try:
@@ -59,18 +43,22 @@ def calculate_days(start_date: str, end_date: str) -> int:
         end = datetime.strptime(end_date, "%Y-%m-%d")
         return (end - start).days + 1
     except Exception:
-        return 0  # 如果格式錯誤則回傳 0 或丟出例外視情況
+        return 0
+
+# -----------------------
+# Trip Request API
+# -----------------------
 
 @app.post("/trip-requests")
-def create_trip_request(trip_request: dict = Body(...)):
+async def create_trip_request(trip_request: dict = Body(...)):
     trip_request["createdAt"] = datetime.utcnow()
-    result = requests_collection.insert_one(trip_request)
+    result = await requests_collection.insert_one(trip_request)
     trip_request["_id"] = str(result.inserted_id)
     return trip_request
 
 @app.get("/trip-requests")
-def get_all_trip_requests():
-    requests = list(requests_collection.find())
+async def get_all_trip_requests():
+    requests = await requests_collection.find().to_list(length=None)
     return [serialize_doc(r) for r in requests]
 
 # -----------------------
@@ -78,30 +66,28 @@ def get_all_trip_requests():
 # -----------------------
 
 @app.get("/trips")
-def get_all_generated_trips():
-    trips = list(trips_collection.find())
+async def get_all_generated_trips():
+    trips = await trips_collection.find().to_list(length=None)
     for trip in trips:
         trip["days"] = calculate_days(trip.get("startDate", ""), trip.get("endDate", ""))
     return [serialize_doc(t) for t in trips]
 
 @app.post("/trips")
-def create_generated_trip(trip: dict = Body(...), user=Depends(get_current_user)):
+async def create_generated_trip(trip: dict = Body(...), user=Depends(get_current_user)):
     try:
-        trip["userId"] = ObjectId(user["_id"])  # ✅ 綁定登入者
+        trip["userId"] = ObjectId(user["_id"])
         trip["createdAt"] = datetime.utcnow()
-
-        result = trips_collection.insert_one(trip)
+        result = await trips_collection.insert_one(trip)
         trip["_id"] = str(result.inserted_id)
-
-        print(f"✅ Inserted trip with ID: {result.inserted_id}")
+        logger.info(f"✅ Inserted trip with ID: {result.inserted_id}")
         return trip
     except Exception as e:
-        print(f"❌ Failed to insert trip: {e}")
+        logger.error(f"❌ Failed to insert trip: {e}")
         raise HTTPException(status_code=500, detail="Insert failed")
 
 @app.post("/trips/{travel_id}/schedule")
-def add_schedule_item(travel_id: str, item: ScheduleItem = Body(...)):
-    travel = trips_collection.find_one({"_id": ObjectId(travel_id)})
+async def add_schedule_item(travel_id: str, item: ScheduleItem = Body(...)):
+    travel = await trips_collection.find_one({"_id": ObjectId(travel_id)})
     if not travel:
         raise HTTPException(status_code=404, detail="Trip not found")
 
@@ -109,10 +95,7 @@ def add_schedule_item(travel_id: str, item: ScheduleItem = Body(...)):
         travel["itinerary"] = []
 
     schedule_entry = {
-        "time": {
-            "start": item.time.start,
-            "end": item.time.end
-        },
+        "time": {"start": item.time.start, "end": item.time.end},
         "activity": item.activity,
         "transportation": item.transportation,
         "note": item.note
@@ -131,7 +114,7 @@ def add_schedule_item(travel_id: str, item: ScheduleItem = Body(...)):
             "schedule": [schedule_entry]
         })
 
-    trips_collection.update_one(
+    await trips_collection.update_one(
         {"_id": ObjectId(travel_id)},
         {"$set": {"itinerary": travel["itinerary"]}}
     )
@@ -139,6 +122,6 @@ def add_schedule_item(travel_id: str, item: ScheduleItem = Body(...)):
     return {"message": "Schedule item added successfully"}
 
 @app.get("/my-trips")
-def get_user_trips(user=Depends(get_current_user)):
-    trips = trips_collection.find({"userId": ObjectId(user["_id"])})
+async def get_user_trips(user=Depends(get_current_user)):
+    trips = await trips_collection.find({"userId": ObjectId(user["_id"])}).to_list(length=None)
     return [serialize_doc(t) for t in trips]

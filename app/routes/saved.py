@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List
-from database import saved_collection  # 須從你的 db 模組取得 collection
+from app.database.database import saved_collection
 
 router = APIRouter()
 
