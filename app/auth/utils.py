@@ -32,3 +32,12 @@ def convert_mongo_user(user_doc: dict) -> dict:
         "bio": user_doc.get("bio")
     }
     
+
+def get_or_create_day(itinerary: list, day: int) -> dict:
+    for d in itinerary:
+        if d.get("day") == day:
+            return d
+    new_day = {"day": day, "schedule": []}
+    itinerary.append(new_day)
+    itinerary.sort(key=lambda d: d["day"])
+    return new_day

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from app.database.database import saved_collection
 
 router = APIRouter()
@@ -9,8 +9,12 @@ router = APIRouter()
 class Attraction(BaseModel):
     id: str
     name: str
-    category: str
-    imageUrl: str = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    rating: Optional[float] = None
+    description: Optional[str] = None
+    tags: Optional[List[str]] = []  # ✅ 改成 List[str]
+    imageUrl: Optional[str] = None
 
 # 儲存一筆收藏
 @router.post("/users/{user_id}/saved")

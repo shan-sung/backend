@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 # 載入 .env 環境變數
 load_dotenv()
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+MONGO_URL = os.getenv("MONGO_URL", "mongodb+srv://shan:13@cluster0.g54wj9s.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client["tripDemo-shan"]
