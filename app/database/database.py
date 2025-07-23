@@ -1,4 +1,5 @@
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
+
 import os
 from dotenv import load_dotenv
 
@@ -15,3 +16,6 @@ trips_collection = db["trips"]
 saved_collection = db["saved_attractions"]
 requests_collection = db["trip_requests"]
 chat_messages_collection = db["chat_messages"]
+
+def get_users_collection() -> AsyncIOMotorCollection:
+    return users_collection

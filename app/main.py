@@ -8,10 +8,11 @@ import logging
 
 from app.auth.auth import router as auth_router
 from app.auth.dependency import get_current_user
-from app.routes import saved
+from app.routes import saved, user, friend
 from app.database.database import requests_collection, trips_collection, chat_messages_collection
 from app.models.schedule_model import ScheduleItem
 from app.models.chat_model import ChatMessage
+from app.models.friend_model import FriendRequestBody
 
 load_dotenv()
 
@@ -22,6 +23,8 @@ app = FastAPI()
 
 app.include_router(auth_router)
 app.include_router(saved.router)
+app.include_router(user.router)
+app.include_router(friend.router)
 
 app.add_middleware(
     CORSMiddleware,
