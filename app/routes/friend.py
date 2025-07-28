@@ -3,7 +3,7 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 from bson import ObjectId
 from datetime import datetime
 from uuid import uuid4
-from app.models.friend_model import FriendRequestBody, FriendResponseBody
+from app.models.friend_model import FriendRequestBody, FriendResponseBody, PendingFriendRequest
 from app.auth.dependency import get_current_user
 from app.database.database import get_users_collection
 
@@ -30,16 +30,16 @@ async def send_friend_request(
     await users_collection.update_one(
         {"_id": ObjectId(to_user_id)},
         {"$addToSet": {"pendingRequests": {
-            "fromUserId": from_user_id,
+            "fromUserId": ObjectId(from_user_id),
             "timestamp": datetime.utcnow()
         }}}
     )
 
-    # 同時加入自己 sentRequests
     await users_collection.update_one(
         {"_id": ObjectId(from_user_id)},
-        {"$addToSet": {"sentRequests": to_user_id}}
+        {"$addToSet": {"sentRequests": ObjectId(to_user_id)}}
     )
+
 
     return {"message": "好友邀請已送出"}
 
@@ -50,10 +50,13 @@ async def get_sent_requests(
     users_collection: AsyncIOMotorCollection = Depends(get_users_collection)
 ):
     doc = await users_collection.find_one({"_id": ObjectId(current_user["_id"])})
-    return doc.get("sentRequests", [])
+    sent = doc.get("sentRequests", [])
+    return [str(uid) for uid in sent]
+
+
 
 # ✅ 查詢我收到的邀請
-@router.get("/friends/pending")
+@router.get("/friends/pending", response_model=list[PendingFriendRequest])
 async def get_pending_requests(
     current_user: dict = Depends(get_current_user),
     users_collection: AsyncIOMotorCollection = Depends(get_users_collection)
@@ -66,9 +69,9 @@ async def get_pending_requests(
     pending_requests = user_doc.get("pendingRequests", [])
 
     # 取得所有 fromUserId 對應的使用者資訊
-    from_user_ids = [ObjectId(req["fromUserId"]) for req in pending_requests if ObjectId.is_valid(req["fromUserId"])]
+    from_user_ids = [req["fromUserId"] for req in pending_requests]
     from_users = await users_collection.find({"_id": {"$in": from_user_ids}}).to_list(length=None)
-    from_user_map = {str(user["_id"]): user for user in from_users}
+    from_user_map = {user["_id"]: user for user in from_users}  # 用 ObjectId 當 key
 
     enriched_requests = []
     for req in pending_requests:
@@ -77,7 +80,7 @@ async def get_pending_requests(
         if user:
             enriched_requests.append({
                 "id": str(uuid4()),
-                "fromUserId": from_id,
+                "fromUserId": str(from_id),  # ✅ 一定要轉成 str
                 "toUserId": str(current_user["_id"]),
                 "status": "PENDING",
                 "timestamp": req["timestamp"].isoformat(),
@@ -97,16 +100,14 @@ async def cancel_friend_request(
 ):
     from_user_id = str(current_user["_id"])
 
-    # 對方的 pendingRequests 中移除 fromUserId
     await users_collection.update_one(
         {"_id": ObjectId(to_user_id)},
-        {"$pull": {"pendingRequests": {"fromUserId": from_user_id}}}
+        {"$pull": {"pendingRequests": {"fromUserId": ObjectId(from_user_id)}}}
     )
 
-    # 自己的 sentRequests 中移除 toUserId
     await users_collection.update_one(
         {"_id": ObjectId(from_user_id)},
-        {"$pull": {"sentRequests": to_user_id}}
+        {"$pull": {"sentRequests": ObjectId(to_user_id)}}
     )
 
     return {"message": "好友邀請已取消"}
@@ -126,15 +127,15 @@ async def respond_to_friend_request(
         await users_collection.update_one(
             {"_id": ObjectId(to_user_id)},
             {
-                "$addToSet": {"friends": from_user_id},
-                "$pull": {"pendingRequests": {"fromUserId": from_user_id}}
+                "$addToSet": {"friends": ObjectId(from_user_id)},
+                "$pull": {"pendingRequests": {"fromUserId": ObjectId(from_user_id)}}
             }
         )
         await users_collection.update_one(
             {"_id": ObjectId(from_user_id)},
             {
-                "$addToSet": {"friends": to_user_id},
-                "$pull": {"sentRequests": to_user_id}
+                "$addToSet": {"friends": ObjectId(to_user_id)},
+                "$pull": {"sentRequests": ObjectId(to_user_id)}
             }
         )
         return {"message": "已接受好友邀請"}
@@ -142,11 +143,11 @@ async def respond_to_friend_request(
         # 拒絕 → 只是從 pending / sent 中移除
         await users_collection.update_one(
             {"_id": ObjectId(to_user_id)},
-            {"$pull": {"pendingRequests": {"fromUserId": from_user_id}}}
+            {"$pull": {"pendingRequests": {"fromUserId": ObjectId(from_user_id)}}}
         )
         await users_collection.update_one(
             {"_id": ObjectId(from_user_id)},
-            {"$pull": {"sentRequests": to_user_id}}
+            {"$pull": {"sentRequests": ObjectId(to_user_id)}}
         )
         return {"message": "已拒絕好友邀請"}
 
@@ -159,8 +160,9 @@ async def get_friend_list(
     user_doc = await users_collection.find_one({"_id": ObjectId(current_user["_id"])})
     friend_ids = user_doc.get("friends", [])
 
-    friend_object_ids = [ObjectId(fid) for fid in friend_ids if ObjectId.is_valid(fid)]
-    friends = await users_collection.find({"_id": {"$in": friend_object_ids}}).to_list(length=None)
+    friends = await users_collection.find({
+        "_id": {"$in": friend_ids}  # friend_ids 是 ObjectId 列表
+    }).to_list(length=None)
 
     return [
         {
