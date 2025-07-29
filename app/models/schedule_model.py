@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Optional
 
 class ScheduleTime(BaseModel):
     start: str
@@ -7,6 +8,8 @@ class ScheduleTime(BaseModel):
 class ScheduleItem(BaseModel):
     day: int
     time: ScheduleTime
-    activity: str
+    placeName: str  
     transportation: str
-    note: str = ""
+    note: Optional[str] = ""
+    placeId: Optional[str] = None
+    photoReference: Optional[str] = None

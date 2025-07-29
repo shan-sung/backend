@@ -3,9 +3,11 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 from bson import ObjectId
 from datetime import datetime
 from uuid import uuid4
-from app.models.friend_model import FriendRequestBody, FriendResponseBody, PendingFriendRequest
+from app.models.friend_model import FriendRequestBody, FriendResponseBody, PendingFriendRequest, FriendSummary
+from app.models.user_model import UserSummary
+
 from app.auth.dependency import get_current_user
-from app.database.database import get_users_collection
+from app.database.database import get_users_collection, users_collection
 
 router = APIRouter()
 
@@ -151,25 +153,54 @@ async def respond_to_friend_request(
         )
         return {"message": "已拒絕好友邀請"}
 
-# ✅ 取得好友清單
-@router.get("/friends/list")
+
+@router.get("/friends/list", response_model=list[FriendSummary])
 async def get_friend_list(
     current_user: dict = Depends(get_current_user),
     users_collection: AsyncIOMotorCollection = Depends(get_users_collection)
 ):
-    user_doc = await users_collection.find_one({"_id": ObjectId(current_user["_id"])})
+    user_doc = await users_collection.find_one({"_id": current_user["_id"]})
     friend_ids = user_doc.get("friends", [])
 
-    friends = await users_collection.find({
-        "_id": {"$in": friend_ids}  # friend_ids 是 ObjectId 列表
-    }).to_list(length=None)
+    if not friend_ids:
+        return []
 
-    return [
-        {
-            "id": str(friend["_id"]),
-            "username": friend.get("username"),
-            "avatarUrl": friend.get("avatarUrl"),
-            "mbti": friend.get("mbti"),
-            "email": friend.get("email"),
-        } for friend in friends
-    ]
+    raw_friends = await users_collection.find({"_id": {"$in": friend_ids}}).to_list(length=None)
+
+    # 使用 FriendSummary.from_mongo() 安全轉換
+    summaries = []
+    for f in raw_friends:
+        summary = FriendSummary.from_mongo(f)
+        if summary:
+            summaries.append(summary)
+        else:
+            print(f"⚠️ 跳過不合法好友資料：{f}")
+
+    return summaries
+
+
+@router.get("/users/search", response_model=UserSummary)
+async def search_user(q: str):
+    user = await users_collection.find_one({"username": q})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return UserSummary(**user)
+
+@router.get("/friends/validate")
+async def validate_friends(
+    current_user: dict = Depends(get_current_user)
+):
+    friend_ids = current_user.get("friends", [])
+    if not friend_ids:
+        return {"valid_count": 0, "invalid_ids": []}
+
+    existing = await users_collection.find({"_id": {"$in": friend_ids}}).to_list(length=None)
+    existing_ids = set(str(u["_id"]) for u in existing)
+    original_ids = set(str(fid) for fid in friend_ids)
+    missing = original_ids - existing_ids
+
+    return {
+        "valid_count": len(existing_ids),
+        "invalid_ids": list(missing)
+    }

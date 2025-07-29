@@ -1,11 +1,17 @@
-from pydantic import BaseModel
-from typing import Optional
+# models/chat_model.py
+from pydantic import BaseModel, Field
+from typing import Optional, List
 from datetime import datetime
+from app.utils.py_object_id import PyObjectId
+from bson import ObjectId
 
-class ChatMessage(BaseModel):
-    id: str
-    chatRoomId: str
-    senderId: str
+class ChatMessageModel(BaseModel):
+    chatRoomId: Optional[str] = None
+    senderId: PyObjectId
     sender: str
     message: str
-    timestamp: int  # milliseconds
+    timestamp: datetime
+
+    class Config:
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str}

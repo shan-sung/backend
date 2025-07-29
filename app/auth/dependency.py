@@ -17,6 +17,7 @@ async def get_current_user(request: Request):
         user = await users_collection.find_one({"_id": ObjectId(user_id)})
         if not user:
             raise HTTPException(status_code=401, detail="Invalid user")
+        user["_id"] = ObjectId(user["_id"])  # 保證為 ObjectId 型別
         return user
     except JWTError:
         raise HTTPException(status_code=401, detail="Token verification failed")
