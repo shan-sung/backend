@@ -8,6 +8,14 @@ from app.database.database import trips_collection, chat_messages_collection
 from app.auth.dependency import get_current_user
 from app.utils.date import calculate_days
 
+def inject_day_into_schedule(trip: dict):
+    if "itinerary" in trip:
+        for day_entry in trip["itinerary"]:
+            day = day_entry.get("day")
+            for item in day_entry.get("schedule", []):
+                item["day"] = day
+
+
 AI_ASSISTANT_ID = ObjectId("68873646be69d9f12e537d8f")
 
 router = APIRouter()
@@ -17,7 +25,9 @@ async def get_all_generated_trips():
     trips = await trips_collection.find().to_list(length=None)
     for trip in trips:
         trip["days"] = calculate_days(trip.get("startDate", ""), trip.get("endDate", ""))
+        inject_day_into_schedule(trip)  # ✅ 補上每筆 schedule 的 day 欄位
     return trips
+
 
 
 @router.get("/trips/{trip_id}", response_model=TravelModel)
@@ -26,7 +36,9 @@ async def get_trip_by_id(trip_id: str):
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
     trip["days"] = calculate_days(trip.get("startDate", ""), trip.get("endDate", ""))
+    inject_day_into_schedule(trip)  # ✅ 同樣補上 day
     return trip
+
 
 
 @router.post("/trips", response_model=TravelModel)
